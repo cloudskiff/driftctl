@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cloudskiff/driftctl/pkg/alerter"
 	"github.com/cloudskiff/driftctl/pkg/output"
-	"github.com/fatih/color"
 	"github.com/hashicorp/terraform/addrs"
 	"github.com/hashicorp/terraform/states"
 	"github.com/hashicorp/terraform/states/statefile"
@@ -32,6 +32,7 @@ type TerraformStateReader struct {
 	deserializer   *resource.Deserializer
 	backendOptions *backend.Options
 	progress       output.Progress
+	alterter       alerter.Alerter
 }
 
 func (r *TerraformStateReader) initReader() error {
@@ -205,24 +206,30 @@ func (r *TerraformStateReader) retrieveForState(path string) ([]resource.Resourc
 func (r *TerraformStateReader) retrieveMultiplesStates() ([]resource.Resource, error) {
 	keys, err := r.enumerator.Enumerate()
 	if err != nil {
+		r.alterter.SendAlert("", NewStateReadAlert(r.enumerator.Source(), err))
 		return nil, err
 	}
+
 	logrus.WithFields(logrus.Fields{
 		"keys": keys,
 	}).Debug("Enumerated keys")
-	results := make([]resource.Resource, 0)
+
+	var results []resource.Resource
+	nbAlert := 0
 
 	for _, key := range keys {
 		resources, err := r.retrieveForState(key)
 		if err != nil {
-			if _, ok := err.(*UnsupportedVersionError); ok {
-				color.New(color.Bold, color.FgYellow).Printf("WARNING: %s\n", err)
-				continue
-			}
-
-			return nil, err
+			r.alterter.SendAlert("", NewStateReadAlert(key, err))
+			nbAlert++
+			continue
 		}
 		results = append(results, resources...)
+	}
+
+	if nbAlert == len(keys) {
+		// all key failed, throw an error
+		return results, errors.Errorf("Files where found but none of them could be read of them as state.")
 	}
 
 	return results, nil

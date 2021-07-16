@@ -5,11 +5,15 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/cloudskiff/driftctl/pkg/alerter"
 	"github.com/cloudskiff/driftctl/pkg/iac/config"
+	"github.com/cloudskiff/driftctl/pkg/iac/terraform/state"
 	"github.com/cloudskiff/driftctl/pkg/iac/terraform/state/backend"
 	"github.com/cloudskiff/driftctl/pkg/output"
 	"github.com/cloudskiff/driftctl/pkg/terraform"
 	"github.com/cloudskiff/driftctl/test/resource"
+	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestGetIACSupplier(t *testing.T) {
@@ -18,9 +22,10 @@ func TestGetIACSupplier(t *testing.T) {
 		options *backend.Options
 	}
 	tests := []struct {
-		name    string
-		args    args
-		wantErr error
+		name       string
+		args       args
+		wantErr    error
+		wantAlerts alerter.Alerts
 	}{
 		{
 			name: "test unknown supplier",
@@ -34,7 +39,10 @@ func TestGetIACSupplier(t *testing.T) {
 					Headers: map[string]string{},
 				},
 			},
-			wantErr: fmt.Errorf("Unsupported supplier 'foobar'"),
+			wantErr: fmt.Errorf("none of given from where supported"),
+			wantAlerts: map[string][]alerter.Alert{
+				"": {state.NewStateEnumerationAlertAlert(errors.Errorf("Unsupported supplier 'foobar'"))},
+			},
 		},
 		{
 			name: "test unknown supplier in multiples states",
@@ -53,7 +61,10 @@ func TestGetIACSupplier(t *testing.T) {
 					Headers: map[string]string{},
 				},
 			},
-			wantErr: fmt.Errorf("Unsupported supplier 'foobar'"),
+			wantErr: nil,
+			wantAlerts: map[string][]alerter.Alert{
+				"": {state.NewStateEnumerationAlertAlert(errors.Errorf("Unsupported supplier 'foobar'"))},
+			},
 		},
 		{
 			name: "test valid tfstate://terraform.tfstate",
@@ -65,7 +76,8 @@ func TestGetIACSupplier(t *testing.T) {
 					Headers: map[string]string{},
 				},
 			},
-			wantErr: nil,
+			wantErr:    nil,
+			wantAlerts: alerter.Alerts{},
 		},
 		{
 			name: "test valid multiples states",
@@ -79,7 +91,8 @@ func TestGetIACSupplier(t *testing.T) {
 					Headers: map[string]string{},
 				},
 			},
-			wantErr: nil,
+			wantErr:    nil,
+			wantAlerts: alerter.Alerts{},
 		},
 	}
 	for _, tt := range tests {
@@ -87,14 +100,17 @@ func TestGetIACSupplier(t *testing.T) {
 			progress := &output.MockProgress{}
 			progress.On("Start").Return().Times(1)
 
+			alerter := alerter.NewAlerter()
+
 			repo := resource.InitFakeSchemaRepository("aws", "3.19.0")
 			factory := terraform.NewTerraformResourceFactory(repo)
 
-			_, err := GetIACSupplier(tt.args.config, terraform.NewProviderLibrary(), tt.args.options, progress, factory)
+			_, err := GetIACSupplier(tt.args.config, terraform.NewProviderLibrary(), tt.args.options, progress, alerter, factory)
 			if tt.wantErr != nil && err.Error() != tt.wantErr.Error() {
 				t.Errorf("GetIACSupplier() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+			assert.Equal(t, tt.wantAlerts, alerter.Retrieve())
 		})
 	}
 }

@@ -3,6 +3,7 @@ package supplier
 import (
 	"fmt"
 
+	"github.com/cloudskiff/driftctl/pkg/alerter"
 	"github.com/cloudskiff/driftctl/pkg/iac/terraform/state/backend"
 	"github.com/cloudskiff/driftctl/pkg/output"
 	"github.com/cloudskiff/driftctl/pkg/terraform"
@@ -33,12 +34,14 @@ func GetIACSupplier(configs []config.SupplierConfig,
 	library *terraform.ProviderLibrary,
 	backendOpts *backend.Options,
 	progress output.Progress,
+	alerter *alerter.Alerter,
 	factory resource.ResourceFactory) (resource.Supplier, error) {
 
-	chainSupplier := resource.NewChainSupplier()
+	chainSupplier := NewIacChainSupplier()
 	for _, config := range configs {
 		if !IsSupplierSupported(config.Key) {
-			return nil, errors.Errorf("Unsupported supplier '%s'", config.Key)
+			alerter.SendAlert("", state.NewStateEnumerationAlertAlert(errors.Errorf("Unsupported supplier '%s'", config.Key)))
+			continue
 		}
 
 		deserializer := resource.NewDeserializer(factory)
@@ -49,11 +52,13 @@ func GetIACSupplier(configs []config.SupplierConfig,
 		case state.TerraformStateReaderSupplier:
 			supplier, err = state.NewReader(config, library, backendOpts, progress, deserializer)
 		default:
-			return nil, errors.Errorf("Unsupported supplier '%s'", config.Key)
+			alerter.SendAlert("", state.NewStateEnumerationAlertAlert(errors.Errorf("Unsupported supplier '%s'", config.Key)))
+			continue
 		}
 
 		if err != nil {
-			return nil, err
+			alerter.SendAlert("", state.NewStateEnumerationAlertAlert(err))
+			continue
 		}
 
 		logrus.WithFields(logrus.Fields{
@@ -64,6 +69,11 @@ func GetIACSupplier(configs []config.SupplierConfig,
 
 		chainSupplier.AddSupplier(supplier)
 	}
+
+	if chainSupplier.CountSuppliers() <= 0 {
+		return nil, errors.New("none of given from where supported")
+	}
+
 	return chainSupplier, nil
 }
 
