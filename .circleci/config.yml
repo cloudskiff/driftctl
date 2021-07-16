@@ -7,7 +7,7 @@ jobs:
       - image: golang:1.16.2
     steps:
       - checkout
-      - run: make release
+      - run: make build
       - persist_to_workspace:
           root: ~/project
           paths:
@@ -21,7 +21,7 @@ jobs:
     environment:
       ACC_PATTERN: << parameters.pattern >>
       AWS_DEFAULT_REGION: us-east-1
-      CHECKPOINT_DISABLE: true # Disable terraform version check
+      CHECKPOINT_DISABLE: 'true' # Disable terraform version check
     steps:
       - checkout
       - go/install:
@@ -83,46 +83,17 @@ jobs:
             ./codecov
       - store_test_results:
           path: ./
-  sign_release:
-    docker:
-      - image: cimg/base:2020.01
-    steps:
-      - attach_workspace:
-          at: ~/project
-      - run:
-          name: "Ensure GnuPG is available"
-          command: gpg --version
-      - run:
-          name: "Import cloudskiff signing key"
-          command: |
-            echo ${SIGNINGKEY} | base64 -d > signingkey
-            gpg --import signingkey
-      - run:
-          name: "Sign release"
-          command: |
-            gpg --output bin/driftctl_SHA256SUMS.gpg -u security@cloudskiff.com --detach-sig bin/driftctl_SHA256SUMS
-      - run:
-          name: "Verify signature"
-          command: |
-            gpg --verify bin/driftctl_SHA256SUMS.gpg bin/driftctl_SHA256SUMS
-      - persist_to_workspace:
-          root: ~/project
-          paths:
-            - bin/
   release:
     environment:
-        CIRCLE_PROJECT_USERNAME: cloudskiff
-        CIRCLE_PROJECT_REPONAME: driftctl
+      CI: circleci
     docker:
-      - image: cibuilds/github:0.13
+      - image: golang:1.16
     steps:
       - attach_workspace:
           at: ~/project
       - run:
-          name: "Publish Release on GitHub"
-          command: |
-            VERSION=$(./bin/driftctl_linux_amd64 version)
-            ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -n ${VERSION} ${VERSION} ./bin/
+          name: "Build and publish release"
+          command: make release
   publish-aur:
     environment:
         AUR_GIT: ssh://aur@aur.archlinux.org/driftctl-bin.git
@@ -243,26 +214,16 @@ workflows:
               only: /^v.*/
             branches:
               ignore: /.*/
-      - sign_release:
-          context: cloudskiff-signing
-          requires:
-            - build
-          filters:
-            tags:
-              only: /^v.*/
-            branches:
-              ignore: /.*/
       - release:
           context: driftctl
           requires:
-            - lint
-            - test
-            - sign_release
+              - lint
+              - test
           filters:
-            tags:
-              only: /^v.*/
-            branches:
-              ignore: /.*/
+              tags:
+                  only: /^v.*/
+              branches:
+                  ignore: /.*/
       - publish-aur:
           requires:
             - release
