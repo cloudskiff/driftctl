@@ -2,6 +2,7 @@ package resource
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"sort"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 type Resource interface {
 	TerraformId() string
 	TerraformType() string
+	TerraformImportId() string
 	Attributes() *Attributes
 	Schema() *Schema
 }
@@ -34,6 +36,67 @@ func (a *AbstractResource) TerraformId() string {
 
 func (a *AbstractResource) TerraformType() string {
 	return a.Type
+}
+
+func (a *AbstractResource) TerraformImportId() string {
+	// NOTE: Sometime just id, sometime more sophisticated string / ARN, check by type
+	importId := ""
+	switch a.Type {
+	case "aws_vpc":
+		importId = a.Id
+	case "aws_subnet":
+		importId = a.Id
+	case "aws_sns_topic_subscription":
+		importId = a.Id
+	case "aws_s3_bucket_policy":
+		importId = a.Id
+	case "aws_iam_access_key":
+		importId = a.Id
+	case "aws_key_pair":
+		importId = a.Id
+	case "aws_iam_policy":
+		importId = a.Id
+	case "aws_iam_role":
+		importId = a.Id
+	case "aws_iam_role_policy":
+		importId = a.Id
+	case "aws_iam_user":
+		importId = a.Id
+	case "aws_s3_bucket":
+		importId = a.Id
+	case "aws_security_group":
+		importId = a.Id
+	case "aws_iam_policy_attachment":
+		// NOTE: terraform not supporting as well
+		// https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy_attachment
+		importId = ""
+	case "aws_security_group_rule":
+		importId = ""
+		// TODO: similar to CreateSecurityGroupRuleIdHash , need some custom type handlings maybe
+		// https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group_rule#import
+	case "aws_route":
+		// NOTE:
+		// https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route
+		// One of the following destination arguments must be supplied:
+		// destination_cidr_block - (Optional) The destination CIDR block.
+		// destination_ipv6_cidr_block - (Optional) The destination IPv6 CIDR block.
+		// destination_prefix_list_id - (Optional) The ID of a managed prefix list destination.
+		_, okDest1 := a.Attrs.Get("destination_cidr_block")
+		_, okDest2 := a.Attrs.Get("destination_ipv6_cidr_block")
+		dest := ""
+		if okDest1 {
+			dest = *a.Attrs.GetString("destination_cidr_block")
+		} else if okDest2 {
+			dest = *a.Attrs.GetString("destination_ipv6_cidr_block")
+		} else {
+			dest = *a.Attrs.GetString("destination_prefix_list_id")
+		}
+		importId = fmt.Sprintf("%s_%s", *a.Attrs.GetString("route_table_id"), dest)
+	default:
+		importId = ""
+	}
+
+	return importId
 }
 
 func (a *AbstractResource) Attributes() *Attributes {
@@ -59,6 +122,10 @@ func (u *SerializedResource) TerraformId() string {
 
 func (u *SerializedResource) TerraformType() string {
 	return u.Type
+}
+
+func (u *SerializedResource) TerraformImportId() string {
+	return ""
 }
 
 func (u *SerializedResource) Attributes() *Attributes {
