@@ -204,3 +204,61 @@ func TestProviderInstallerWithConfigDirectory(t *testing.T) {
 	assert.Equal(path.Join(fakeTmpHome, expectedSubFolder, config.GetBinaryName()), providerPath)
 
 }
+
+func TestProviderInstallerWithConfigDirectoryCantCreate(t *testing.T) {
+
+	assert := assert.New(t)
+	fakeTmpHome := t.TempDir()
+
+	expectedSubFolder := fmt.Sprintf("/.driftctl/plugins/%s_%s", runtime.GOOS, runtime.GOARCH)
+
+	config := ProviderConfig{
+		Key:       "aws",
+		Version:   "3.19.0",
+		ConfigDir: fakeTmpHome,
+	}
+
+	_ = os.Chmod(fakeTmpHome, 0555)
+
+	mockDownloader := mocks.ProviderDownloaderInterface{}
+	mockDownloader.On("Download", config.GetDownloadUrl(), path.Join(fakeTmpHome, expectedSubFolder)).Return(nil)
+	mockInstaller := mocks.HomeDirInterface{}
+	mockInstaller.On("getProviderDirectory").Return("")
+
+	installer, _ := NewProviderInstaller(config)
+	installer.downloader = &mockDownloader
+
+	providerPath, err := installer.Install()
+
+	assert.Equal("", providerPath)
+	assert.True(err != nil)
+
+}
+
+func TestProviderInstallerWithConfigDirectoryCantWrite(t *testing.T) {
+
+	assert := assert.New(t)
+	fakeTmpHome := t.TempDir()
+
+	expectedSubFolder := fmt.Sprintf("/.driftctl/plugins/%s_%s", runtime.GOOS, runtime.GOARCH)
+
+	config := ProviderConfig{
+		Key:       "aws",
+		Version:   "3.19.0",
+		ConfigDir: fakeTmpHome,
+	}
+
+	mockDownloader := mocks.ProviderDownloaderInterface{}
+	mockDownloader.On("Download", config.GetDownloadUrl(), path.Join(fakeTmpHome, expectedSubFolder)).Return(nil)
+
+	installer, _ := NewProviderInstaller(config)
+	installer.downloader = &mockDownloader
+
+	joinedPath := path.Join(installer.getProviderDirectory())
+	_ = os.MkdirAll(joinedPath, 0000)
+
+	providerPath, err := installer.Install()
+
+	assert.Equal("", providerPath)
+	assert.EqualErrorf(err, fmt.Sprintf("can't write in configuration directory: open %s/.is_directory_writable: permission denied", joinedPath), "")
+}
